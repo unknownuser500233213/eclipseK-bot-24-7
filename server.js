@@ -1,6 +1,11 @@
 const dns = require("node:dns");
 dns.setDefaultResultOrder("ipv4first");
 
+process.env.NODE_OPTIONS = "--dns-result-order=ipv4first";
+
+const dns = require("node:dns");
+dns.setDefaultResultOrder("ipv4first");
+
 process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
 process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
@@ -111,4 +116,5 @@ http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
   res.end("ok");
 }).listen(PORT, () => console.log("HTTP port open on", PORT));
+
 
