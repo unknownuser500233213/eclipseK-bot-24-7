@@ -113,4 +113,7 @@ app.listen(PORT, () => {
 });
 
 // ✅ Login the bot
-client.login(token);
+client.login(token)
+  .then(() => console.log("Discord client.login() called"))
+  .catch(err => console.error("Discord login failed:", err));
+
