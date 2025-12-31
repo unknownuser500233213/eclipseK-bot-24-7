@@ -1,3 +1,6 @@
+const dns = require("node:dns");
+dns.setDefaultResultOrder("ipv4first");
+
 const express = require("express");
 const {
   InteractionType,
@@ -107,8 +110,11 @@ client.on("presenceUpdate", async (oldPresence, newPresence) => {
     if (!newPresence?.member) return;
 
     const member = newPresence.member;
+
+    // Must have /eclipse role
     const hasEclipse = member.roles.cache.has(eclipseRoleId);
 
+    // Read custom status
     const customStatus = newPresence.activities?.find(
       (a) => a.type === 4 // CUSTOM_STATUS
     );
@@ -145,7 +151,7 @@ console.log("Trying Discord login...");
 
 setTimeout(() => {
   console.log(
-    "Still not logged in after 10s. This usually means the Discord gateway connection is hanging/blocked."
+    "Still not logged in after 10s. If you still see this after the IPv4 fix, tell me."
   );
 }, 10000);
 
