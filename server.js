@@ -7,20 +7,24 @@ const {
 
 const { Client, GatewayIntentBits } = require("discord.js");
 
-// ✅ put these in config.json
-const {
-  publicKey,
-  token,
-  eclipseRoleId,
-  picPermsRoleId
-} = require("./config.json");
+// ✅ Render ENV VARS (set these in Render -> Environment)
+const publicKey = process.env.PUBLIC_KEY;
+const token = process.env.TOKEN;
+const eclipseRoleId = process.env.ECLIPSE_ROLE_ID;
+const picPermsRoleId = process.env.PICPERMS_ROLE_ID;
+
+if (!publicKey || !token || !eclipseRoleId || !picPermsRoleId) {
+  console.log(
+    "Missing env vars. Need: PUBLIC_KEY, TOKEN, ECLIPSE_ROLE_ID, PICPERMS_ROLE_ID"
+  );
+}
 
 const app = express();
 
 // Discord requires raw body for signature verification
 app.use(express.raw({ type: "application/json" }));
 
-// --- Webhook endpoint for slash command interactions (your current system) ---
+// --- Webhook endpoint for slash command interactions ---
 app.post("/interactions", verifyKeyMiddleware(publicKey), (req, res) => {
   const interaction = req.body;
 
