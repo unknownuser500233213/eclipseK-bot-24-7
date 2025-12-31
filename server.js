@@ -1,18 +1,37 @@
-// ---------- DNS / stability tweaks ----------
+// ================== STABILITY / DNS ==================
 const dns = require("node:dns");
 dns.setDefaultResultOrder("ipv4first");
 
-process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
-process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
+process.on("unhandledRejection", (e) =>
+  console.error("unhandledRejection:", e)
+);
+process.on("uncaughtException", (e) =>
+  console.error("uncaughtException:", e)
+);
 
+// ================== HTTP (RENDER KEEP-ALIVE) ==================
 const http = require("http");
-const { Client, GatewayIntentBits, ActivityType } = require("discord.js");
+const PORT = process.env.PORT || 10000;
 
-// ---------- ENV VARS ----------
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("ok");
+  })
+  .listen(PORT, () => console.log("HTTP port open on", PORT));
+
+// ================== DISCORD ==================
+const {
+  Client,
+  GatewayIntentBits,
+  ActivityType
+} = require("discord.js");
+
+// ================== ENV VARS ==================
 const token = process.env.TOKEN;
 const eclipseRoleId = process.env.ECLIPSE_ROLE_ID;
 const picPermsRoleId = process.env.PICPERMS_ROLE_ID;
-const guildId = process.env.GUILD_ID || null; // optional but recommended
+const guildId = process.env.GUILD_ID || null;
 
 console.log("ENV CHECK:", {
   tokenLength: token ? token.length : 0,
@@ -21,16 +40,7 @@ console.log("ENV CHECK:", {
   hasGUILD_ID: !!guildId
 });
 
-// ---------- Render needs an open port ----------
-const PORT = process.env.PORT || 10000;
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { "Content-Type": "text/plain" });
-    res.end("ok");
-  })
-  .listen(PORT, () => console.log("HTTP port open on", PORT));
-
-// ---------- Discord client ----------
+// ================== CLIENT ==================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -39,31 +49,56 @@ const client = new Client({
   ]
 });
 
-// ---------- Gateway logs + recovery ----------
+// ================== GATEWAY EVENTS ==================
 client.on("warn", (m) => console.log("WARN:", m));
 client.on("error", (e) => console.error("ERROR:", e));
 client.on("shardError", (e) => console.error("SHARD ERROR:", e));
 
 client.on("shardDisconnect", (event) => {
-  console.log("DISCONNECTED from Discord:", event?.code, event?.reason);
-  // Best-effort on Render free: force restart so it reconnects cleanly
-  setTimeout(() => process.exit(1), 2000);
+  console.log("DISCONNECTED:", event?.code, event?.reason);
+  setTimeout(() => process.exit(1), 2000); // force restart
 });
 
-client.on("shardReconnecting", () => console.log("Reconnecting to Discord..."));
-client.on("shardResume", () => console.log("Shard resumed"));
+client.on("shardReconnecting", () =>
+  console.log("Reconnecting to Discord...")
+);
+
+client.on("shardResume", () =>
+  console.log("Shard resumed")
+);
 
 client.on("invalidated", () => {
-  console.log("Session invalidated, exiting to restart");
+  console.log("Session invalidated → restarting");
   process.exit(1);
 });
 
-// ---------- Core logic ----------
+// ================== WATCHDOG ==================
+let lastReadyAt = Date.now();
+
+client.once("ready", () => {
+  lastReadyAt = Date.now();
+  console.log(`✅ Bot logged in as ${client.user.tag}`);
+});
+
+client.on("shardResume", () => {
+  lastReadyAt = Date.now();
+});
+
+// Restart if stuck offline for >2 minutes
+setInterval(() => {
+  const ready = client.isReady?.() === true;
+  const age = Date.now() - lastReadyAt;
+
+  if (!ready && age > 2 * 60 * 1000) {
+    console.log("WATCHDOG: bot offline >2m → restarting");
+    process.exit(1);
+  }
+}, 30000);
+
+// ================== ROLE LOGIC ==================
 async function applyPicPerms(member, presence) {
-  // Must have the eclipse role
   const hasEclipse = member.roles.cache.has(eclipseRoleId);
 
-  // Custom status text
   const customStatus = presence?.activities?.find(
     (a) => a.type === ActivityType.Custom
   );
@@ -84,44 +119,18 @@ async function applyPicPerms(member, presence) {
   }
 }
 
-client.on("presenceUpdate", async (oldPresence, newPresence) => {
+client.on("presenceUpdate", async (_, newPresence) => {
   try {
     if (!newPresence?.member) return;
-
-    // Only operate in your server (recommended)
     if (guildId && newPresence.guild?.id !== guildId) return;
 
     await applyPicPerms(newPresence.member, newPresence);
-  } catch (err) {
-    console.error("presenceUpdate error:", err);
-  }
-});
-
-// Optional: scan members on startup (can be heavy on big servers)
-// Uncomment if you want it to re-apply roles after restarts.
-/*
-client.once("ready", async () => {
-  console.log(`✅ Bot logged in as ${client.user.tag}`);
-  try {
-    const g = guildId ? await client.guilds.fetch(guildId) : null;
-    if (!g) return;
-
-    const members = await g.members.fetch();
-    for (const m of members.values()) {
-      await applyPicPerms(m, m.presence);
-    }
-    console.log("Startup scan done.");
   } catch (e) {
-    console.error("Startup scan error:", e);
+    console.error("presenceUpdate error:", e);
   }
 });
-*/
 
-client.once("ready", () => {
-  console.log(`✅ Bot logged in as ${client.user.tag}`);
-});
-
-// ---------- Login ----------
+// ================== LOGIN ==================
 console.log("Trying Discord login...");
 client
   .login(token)
