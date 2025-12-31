@@ -103,3 +103,12 @@ setTimeout(() => {
 client.login(token)
   .then(() => console.log("Discord login OK"))
   .catch((err) => console.error("Discord login FAILED:", err));
+// Render Web Service needs an open port or it will keep scanning forever
+const http = require("http");
+const PORT = process.env.PORT || 10000;
+
+http.createServer((req, res) => {
+  res.writeHead(200, { "Content-Type": "text/plain" });
+  res.end("ok");
+}).listen(PORT, () => console.log("HTTP port open on", PORT));
+
