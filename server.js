@@ -1,92 +1,26 @@
 const dns = require("node:dns");
 dns.setDefaultResultOrder("ipv4first");
 
-const express = require("express");
-const {
-  InteractionType,
-  InteractionResponseType,
-  verifyKeyMiddleware
-} = require("discord-interactions");
+process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
+process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
 
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, ActivityType } = require("discord.js");
 
-/* ===============================
-   EXTRA DEBUG (SHOW REAL ERRORS)
-================================ */
-process.on("unhandledRejection", (e) =>
-  console.error("unhandledRejection:", e)
-);
-process.on("uncaughtException", (e) =>
-  console.error("uncaughtException:", e)
-);
-
-/* ===============================
-   ENV VARIABLES (Render)
-================================ */
-const publicKey = process.env.PUBLIC_KEY;
+// ENV VARS (set these in Render -> Environment)
 const token = process.env.TOKEN;
 const eclipseRoleId = process.env.ECLIPSE_ROLE_ID;
 const picPermsRoleId = process.env.PICPERMS_ROLE_ID;
 
-/* DEBUG ENV CHECK */
+// Optional: if you want to restrict to one server only (recommended)
+const guildId = process.env.GUILD_ID; // optional
+
 console.log("ENV CHECK:", {
-  hasPUBLIC_KEY: !!publicKey,
   tokenLength: token ? token.length : 0,
   hasECLIPSE_ROLE_ID: !!eclipseRoleId,
-  hasPICPERMS_ROLE_ID: !!picPermsRoleId
+  hasPICPERMS_ROLE_ID: !!picPermsRoleId,
+  hasGUILD_ID: !!guildId
 });
 
-const app = express();
-
-/* Discord requires raw body */
-app.use(express.raw({ type: "application/json" }));
-
-/* ===============================
-   INTERACTIONS ENDPOINT
-================================ */
-app.post("/interactions", verifyKeyMiddleware(publicKey), (req, res) => {
-  const interaction = req.body;
-
-  if (interaction.type === InteractionType.PING) {
-    return res.send({ type: InteractionResponseType.PONG });
-  }
-
-  if (
-    interaction.type === InteractionType.APPLICATION_COMMAND &&
-    interaction.data.name === "rules"
-  ) {
-    return res.send({
-      type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-      data: {
-        embeds: [
-          {
-            title: "Server Rules",
-            description: [
-              "**Keep it simple. Don’t be weird, don’t ruin the server.**",
-              "",
-              "• Don’t harass, threaten, or target people.",
-              "• No hate speech or slurs.",
-              "• Nothing illegal.",
-              "• No NSFW images or videos.",
-              "• No spamming.",
-              "",
-              "Discord rules apply:",
-              "https://discord.com/terms",
-              "https://discord.com/guidelines"
-            ].join("\n"),
-            color: 0x2f3136
-          }
-        ]
-      }
-    });
-  }
-
-  return res.status(400).send("Unhandled interaction");
-});
-
-/* ===============================
-   DISCORD BOT CLIENT
-================================ */
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -95,68 +29,77 @@ const client = new Client({
   ]
 });
 
-/* Gateway / shard debug */
-client.on("error", (e) => console.error("client error:", e));
-client.on("warn", (m) => console.log("client warn:", m));
-client.on("shardError", (e) => console.error("shardError:", e));
+// extra logs
+client.on("warn", (m) => console.log("WARN:", m));
+client.on("error", (e) => console.error("ERROR:", e));
+client.on("shardError", (e) => console.error("SHARD ERROR:", e));
 client.on("shardDisconnect", (event) =>
-  console.log("shardDisconnect:", event?.code, event?.reason)
+  console.log("DISCONNECT:", event?.code, event?.reason)
 );
-client.on("shardReconnecting", () => console.log("shardReconnecting..."));
+client.on("shardReconnecting", () => console.log("RECONNECTING..."));
 
-/* Presence → role logic */
+async function applyPicPerms(member, presence) {
+  // must have eclipse role
+  const hasEclipse = member.roles.cache.has(eclipseRoleId);
+
+  // read custom status
+  const customStatus = presence?.activities?.find((a) => a.type === ActivityType.Custom);
+  const hasTrigger = customStatus?.state?.includes("/eclipseK");
+
+  const hasPicPerms = member.roles.cache.has(picPermsRoleId);
+
+  if (hasEclipse && hasTrigger) {
+    if (!hasPicPerms) await member.roles.add(picPermsRoleId);
+  } else {
+    if (hasPicPerms) await member.roles.remove(picPermsRoleId);
+  }
+}
+
 client.on("presenceUpdate", async (oldPresence, newPresence) => {
   try {
     if (!newPresence?.member) return;
 
-    const member = newPresence.member;
+    // optional: only act in one guild
+    if (guildId && newPresence.guild?.id !== guildId) return;
 
-    // Must have /eclipse role
-    const hasEclipse = member.roles.cache.has(eclipseRoleId);
-
-    // Read custom status
-    const customStatus = newPresence.activities?.find(
-      (a) => a.type === 4 // CUSTOM_STATUS
-    );
-
-    const hasTrigger = customStatus?.state?.includes("/eclipseK");
-    const hasPicPerms = member.roles.cache.has(picPermsRoleId);
-
-    if (hasEclipse && hasTrigger) {
-      if (!hasPicPerms) await member.roles.add(picPermsRoleId);
-    } else {
-      if (hasPicPerms) await member.roles.remove(picPermsRoleId);
-    }
+    await applyPicPerms(newPresence.member, newPresence);
   } catch (err) {
     console.error("presenceUpdate error:", err);
   }
 });
 
-client.once("ready", () => {
-  console.log(`Bot logged in as ${client.user.tag}`);
+// OPTIONAL startup scan: fixes roles after restarts (recommended)
+client.once("ready", async () => {
+  console.log(`Logged in as ${client.user.tag}`);
+
+  try {
+    const guildsToScan = guildId
+      ? [client.guilds.cache.get(guildId)].filter(Boolean)
+      : Array.from(client.guilds.cache.values());
+
+    for (const g of guildsToScan) {
+      console.log("Startup scan guild:", g.name, g.id);
+
+      // fetch members so roles/presences are available
+      const members = await g.members.fetch();
+
+      for (const member of members.values()) {
+        const presence = member.presence; // might be undefined if offline/invisible
+        await applyPicPerms(member, presence);
+      }
+    }
+
+    console.log("Startup scan done.");
+  } catch (err) {
+    console.error("Startup scan error:", err);
+  }
 });
 
-/* ===============================
-   START SERVER
-================================ */
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`Listening on port ${PORT}`);
-});
-
-/* ===============================
-   LOGIN BOT (WITH DEBUG)
-================================ */
 console.log("Trying Discord login...");
-
 setTimeout(() => {
-  console.log(
-    "Still not logged in after 10s. If you still see this after the IPv4 fix, tell me."
-  );
-}, 10000);
+  console.log("Still not logged in after 15s (gateway hang/blocked).");
+}, 15000);
 
-client
-  .login(token)
+client.login(token)
   .then(() => console.log("Discord login OK"))
   .catch((err) => console.error("Discord login FAILED:", err));
-
