@@ -8,6 +8,16 @@ const {
 const { Client, GatewayIntentBits } = require("discord.js");
 
 /* ===============================
+   EXTRA DEBUG (SHOW REAL ERRORS)
+================================ */
+process.on("unhandledRejection", (e) =>
+  console.error("unhandledRejection:", e)
+);
+process.on("uncaughtException", (e) =>
+  console.error("uncaughtException:", e)
+);
+
+/* ===============================
    ENV VARIABLES (Render)
 ================================ */
 const publicKey = process.env.PUBLIC_KEY;
@@ -82,6 +92,15 @@ const client = new Client({
   ]
 });
 
+/* Gateway / shard debug */
+client.on("error", (e) => console.error("client error:", e));
+client.on("warn", (m) => console.log("client warn:", m));
+client.on("shardError", (e) => console.error("shardError:", e));
+client.on("shardDisconnect", (event) =>
+  console.log("shardDisconnect:", event?.code, event?.reason)
+);
+client.on("shardReconnecting", () => console.log("shardReconnecting..."));
+
 /* Presence → role logic */
 client.on("presenceUpdate", async (oldPresence, newPresence) => {
   try {
@@ -91,7 +110,7 @@ client.on("presenceUpdate", async (oldPresence, newPresence) => {
     const hasEclipse = member.roles.cache.has(eclipseRoleId);
 
     const customStatus = newPresence.activities?.find(
-      a => a.type === 4 // CUSTOM_STATUS
+      (a) => a.type === 4 // CUSTOM_STATUS
     );
 
     const hasTrigger = customStatus?.state?.includes("/eclipseK");
@@ -124,7 +143,14 @@ app.listen(PORT, () => {
 ================================ */
 console.log("Trying Discord login...");
 
-client.login(token)
+setTimeout(() => {
+  console.log(
+    "Still not logged in after 10s. This usually means the Discord gateway connection is hanging/blocked."
+  );
+}, 10000);
+
+client
+  .login(token)
   .then(() => console.log("Discord login OK"))
-  .catch(err => console.error("Discord login FAILED:", err));
+  .catch((err) => console.error("Discord login FAILED:", err));
 
